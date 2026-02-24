@@ -1,0 +1,316 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  username      String?  @unique
+  email         String?  @unique
+  profileImage  String?
+  isVerified    Boolean  @default(false)
+  isAdmin       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Trading statistics
+  totalVolume   Float @default(0)
+  totalTrades   Int   @default(0)
+  winRate       Float @default(0)
+  profitLoss    Float @default(0)
+
+  // Relations
+  createdMarkets Market[]
+  orders         Order[]
+  buyTrades      Trade[] @relation("BuyerTrades")
+  sellTrades     Trade[] @relation("SellerTrades")
+  positions      Position[]
+  resolutions    Resolution[]
+  liquidityPools LiquidityPool[]
+
+  @@index([walletAddress])
+  @@index([isAdmin])
+  @@index([createdAt])
+  @@index([totalVolume])
+  @@index([winRate])
+  @@map("users")
+}
+
+model Market {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  category    String
+  tags        String[]
+  
+  // Market configuration
+  type        MarketType
+  endDate     DateTime // CHECK: endDate > NOW() when status = 'ACTIVE'
+  resolutionDate DateTime?
+  
+  // Market state
+  status      MarketStatus @default(ACTIVE)
+  totalVolume Float        @default(0) // CHECK: totalVolume >= 0
+  totalShares Float        @default(0) // CHECK: totalShares >= 0
+  
+  // Resolution
+  winningOutcome   String?
+  resolutionSource String?
+  
+  // Metadata
+  creatorId String
+  creator   User   @relation(fields: [creatorId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  outcomes    Outcome[]
+  orders      Order[]
+  trades      Trade[]
+  positions   Position[]
+  resolutions Resolution[]
+  liquidityPools LiquidityPool[]
+
+  @@index([status])
+  @@index([category])
+  @@index([type])
+  @@index([creatorId])
+  @@index([endDate])
+  @@index([createdAt])
+  @@index([totalVolume])
+  @@index([status, endDate])
+  @@index([category, status])
+  @@index([type, status])
+  @@map("markets")
+}
+
+model Outcome {
+  id          String @id @default(cuid())
+  marketId    String
+  name        String
+  description String?
+  
+  // Price data - prices should be between 0 and 1 for binary markets
+  currentPrice Float @default(0.5) @db.DoublePrecision // CHECK: currentPrice >= 0 AND currentPrice <= 1
+  totalShares  Float @default(0) @db.DoublePrecision   // CHECK: totalShares >= 0
+  
+  // Order book data
+  bestBid Float @default(0) @db.DoublePrecision // CHECK: bestBid >= 0 AND bestBid <= 1
+  bestAsk Float @default(1) @db.DoublePrecision // CHECK: bestAsk >= 0 AND bestAsk <= 1 AND bestAsk >= bestBid
+  spread  Float @default(1) @db.DoublePrecision // CHECK: spread >= 0
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  market    Market     @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  orders    Order[]
+  trades    Trade[]
+  positions Position[]
+
+  @@index([marketId])
+  @@index([currentPrice])
+  @@index([marketId, currentPrice])
+  @@map("outcomes")
+}
+
+model Order {
+  id        String @id @default(cuid())
+  userId    String
+  marketId  String
+  outcomeId String
+  
+  // Order details
+  type      OrderType
+  orderType OrderSubType
+  quantity  Float @db.DoublePrecision // CHECK: quantity > 0
+  price     Float @db.DoublePrecision // CHECK: price >= 0 AND price <= 1
+  
+  // Order state
+  status            OrderStatus @default(PENDING)
+  filledQuantity    Float       @default(0) @db.DoublePrecision // CHECK: filledQuantity >= 0 AND filledQuantity <= quantity
+  remainingQuantity Float @db.DoublePrecision // CHECK: remainingQuantity >= 0 AND remainingQuantity <= quantity
+  
+  // Timestamps
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expiresAt DateTime?
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id])
+  market  Market  @relation(fields: [marketId], references: [id])
+  outcome Outcome @relation(fields: [outcomeId], references: [id])
+  
+  buyTrades  Trade[] @relation("BuyOrderTrades")
+  sellTrades Trade[] @relation("SellOrderTrades")
+
+  @@index([userId])
+  @@index([marketId])
+  @@index([outcomeId])
+  @@index([status])
+  @@index([type])
+  @@index([price])
+  @@index([createdAt])
+  @@index([userId, status])
+  @@index([marketId, outcomeId, status])
+  @@index([marketId, type, status])
+  @@map("orders")
+}
+
+model Trade {
+  id        String @id @default(cuid())
+  marketId  String
+  outcomeId String
+  
+  // Trade parties
+  buyerId     String
+  sellerId    String
+  buyOrderId  String
+  sellOrderId String
+  
+  // Trade details
+  quantity   Float @db.DoublePrecision // CHECK: quantity > 0
+  price      Float @db.DoublePrecision // CHECK: price >= 0 AND price <= 1
+  totalValue Float @db.DoublePrecision // CHECK: totalValue >= 0
+  
+  // Fees
+  buyerFee  Float @db.DoublePrecision // CHECK: buyerFee >= 0
+  sellerFee Float @db.DoublePrecision // CHECK: sellerFee >= 0
+  
+  createdAt DateTime @default(now())
+
+  // Relations
+  market    Market  @relation(fields: [marketId], references: [id])
+  outcome   Outcome @relation(fields: [outcomeId], references: [id])
+  buyer     User    @relation("BuyerTrades", fields: [buyerId], references: [id])
+  seller    User    @relation("SellerTrades", fields: [sellerId], references: [id])
+  buyOrder  Order   @relation("BuyOrderTrades", fields: [buyOrderId], references: [id])
+  sellOrder Order   @relation("SellOrderTrades", fields: [sellOrderId], references: [id])
+
+  @@index([marketId])
+  @@index([outcomeId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([createdAt])
+  @@index([marketId, createdAt])
+  @@index([buyerId, createdAt])
+  @@index([sellerId, createdAt])
+  @@map("trades")
+}
+
+model Position {
+  id        String @id @default(cuid())
+  userId    String
+  marketId  String
+  outcomeId String
+  
+  // Position details
+  quantity     Float @db.DoublePrecision
+  averagePrice Float @db.DoublePrecision
+  totalCost    Float @db.DoublePrecision
+  currentValue Float @db.DoublePrecision
+  unrealizedPnL Float @db.DoublePrecision
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id])
+  market  Market  @relation(fields: [marketId], references: [id])
+  outcome Outcome @relation(fields: [outcomeId], references: [id])
+
+  @@unique([userId, marketId, outcomeId])
+  @@index([userId])
+  @@index([marketId])
+  @@index([outcomeId])
+  @@index([userId, marketId])
+  @@map("positions")
+}
+
+model Resolution {
+  id               String           @id @default(cuid())
+  marketId         String
+  outcome          String
+  evidence         String?
+  status           ResolutionStatus @default(PENDING)
+  disputeDeadline  DateTime?
+  
+  resolvedBy String
+  resolver   User   @relation(fields: [resolvedBy], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@index([marketId])
+  @@index([status])
+  @@index([resolvedBy])
+  @@index([createdAt])
+  @@map("resolutions")
+}
+
+model LiquidityPool {
+  id             String @id @default(cuid())
+  marketId       String
+  providerId     String
+  totalLiquidity Float  @db.DoublePrecision // CHECK: totalLiquidity >= 0
+  shares         Float  @db.DoublePrecision // CHECK: shares >= 0
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  market   Market @relation(fields: [marketId], references: [id])
+  provider User   @relation(fields: [providerId], references: [id])
+
+  @@index([marketId])
+  @@index([providerId])
+  @@index([marketId, providerId])
+  @@map("liquidity_pools")
+}
+
+// Enums
+enum MarketType {
+  BINARY
+  MULTI_OUTCOME
+}
+
+enum MarketStatus {
+  ACTIVE
+  CLOSED
+  RESOLVED
+  DISPUTED
+}
+
+enum OrderType {
+  BUY
+  SELL
+}
+
+enum OrderSubType {
+  MARKET
+  LIMIT
+}
+
+enum OrderStatus {
+  PENDING
+  PARTIAL
+  FILLED
+  CANCELLED
+}
+
+enum ResolutionStatus {
+  PENDING
+  RESOLVED
+  DISPUTED
+}

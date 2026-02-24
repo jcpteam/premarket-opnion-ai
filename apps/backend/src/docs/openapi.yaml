@@ -1,0 +1,132 @@
+openapi: 3.0.0
+info:
+  title: Prediction Market Platform API
+  version: 1.0.0
+  description: REST API for prediction market trading platform with Web3 integration
+
+servers:
+  - url: http://localhost:3001/api
+    description: Development server
+  - url: https://api.predictionmarket.com/api
+    description: Production server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Market:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum: [active, closed, resolved, disputed]
+        totalVolume:
+          type: number
+        endDate:
+          type: string
+          format: date-time
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [buy, sell]
+        orderType:
+          type: string
+          enum: [market, limit]
+        quantity:
+          type: number
+        price:
+          type: number
+        status:
+          type: string
+
+paths:
+  /auth/nonce:
+    get:
+      summary: Get authentication nonce
+      responses:
+        '200':
+          description: Nonce generated
+
+  /auth/wallet:
+    post:
+      summary: Authenticate with wallet signature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                walletAddress:
+                  type: string
+                signature:
+                  type: string
+      responses:
+        '200':
+          description: Authentication successful
+
+  /markets:
+    get:
+      summary: List all markets
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Markets retrieved
+
+    post:
+      summary: Create new market
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Market'
+      responses:
+        '201':
+          description: Market created
+
+  /orders:
+    post:
+      summary: Place new order
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Order'
+      responses:
+        '201':
+          description: Order placed
